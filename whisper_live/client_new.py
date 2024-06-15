@@ -10,7 +10,7 @@ import websocket
 import uuid
 import time
 import ffmpeg
-from . import utils
+import whisper_live.utils as utils
 
 class Client:
     """
@@ -55,8 +55,6 @@ class Client:
         self.use_vad = use_vad
         self.last_segment = None
         self.last_received_segment = None
-        self.callback = callback if callback is not None else Client.default_callback
-        # self.eos = None
 
         if translate:
             self.task = "translate"
@@ -260,6 +258,7 @@ class Client:
         assert self.last_response_received
         while time.time() - self.last_response_received < self.disconnect_if_no_response_for:
             continue
+
 
 class TranscriptionTeeClient:
     """
@@ -477,7 +476,42 @@ class TranscriptionTeeClient:
 
         return process
 
-    
+    def save_chunk(self, n_audio_file):
+        """
+        Saves the current audio frames to a WAV file in a separate thread.
+
+        Args:
+        n_audio_file (int): The index of the audio file which determines the filename.
+                            This helps in maintaining the order and uniqueness of each chunk.
+        """
+        t = threading.Thread(
+            target=self.write_audio_frames_to_file,
+            args=(self.frames[:], f"chunks/{n_audio_file}.wav",),
+        )
+        t.start()
+
+    def finalize_recording(self, n_audio_file):
+        """
+        Finalizes the recording process by saving any remaining audio frames,
+        closing the audio stream, and terminating the process.
+
+        Args:
+        n_audio_file (int): The file index to be used if there are remaining audio frames to be saved.
+                            This index is incremented before use if the last chunk is saved.
+        """
+        if self.save_output_recording and len(self.frames):
+            self.write_audio_frames_to_file(
+                self.frames[:], f"chunks/{n_audio_file}.wav"
+            )
+            n_audio_file += 1
+        self.stream.stop_stream()
+        self.stream.close()
+        self.p.terminate()
+        self.close_all_clients()
+        if self.save_output_recording:
+            self.write_output_recording(n_audio_file)
+        self.write_all_clients_srt()
+
     def record(self):
         """
         Record audio data from the input stream and save it to a WAV file.
@@ -510,31 +544,13 @@ class TranscriptionTeeClient:
                 # save frames if more than a minute
                 if len(self.frames) > 60 * self.rate:
                     if self.save_output_recording:
-                        t = threading.Thread(
-                            target=self.write_audio_frames_to_file,
-                            args=(
-                                self.frames[:],
-                                f"chunks/{n_audio_file}.wav",
-                            ),
-                        )
-                        t.start()
+                        self.save_chunk(n_audio_file)
                         n_audio_file += 1
                     self.frames = b""
             self.write_all_clients_srt()
 
         except KeyboardInterrupt:
-            if self.save_output_recording and len(self.frames):
-                self.write_audio_frames_to_file(
-                    self.frames[:], f"chunks/{n_audio_file}.wav"
-                )
-                n_audio_file += 1
-            self.stream.stop_stream()
-            self.stream.close()
-            self.p.terminate()
-            self.close_all_clients()
-            if self.save_output_recording:
-                self.write_output_recording(n_audio_file)
-            self.write_all_clients_srt()
+            self.finalize_recording(n_audio_file)
 
     def write_audio_frames_to_file(self, frames, file_name):
         """
@@ -624,6 +640,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         translate (bool, optional): Indicates whether translation tasks are required (default is False).
         save_output_recording (bool, optional): Indicates whether to save recording from microphone.
         output_recording_filename (str, optional): File to save the output recording.
+        output_transcription_path (str, optional): File to save the output transcription.
 
     Attributes:
         client (Client): An instance of the underlying Client class responsible for handling the WebSocket connection.
@@ -645,7 +662,7 @@ class TranscriptionClient(TranscriptionTeeClient):
         use_vad=True,
         save_output_recording=False,
         output_recording_filename="./output_recording.wav",
-        output_transcription_path="./output.srt",
+        output_transcription_path="./output.srt"
     ):
         self.client = Client(host, port, lang, translate, model, srt_file_path=output_transcription_path, use_vad=use_vad)
         if save_output_recording and not output_recording_filename.endswith(".wav"):

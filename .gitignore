@@ -161,3 +161,6 @@ cython_debug/
 
 output_recording.wav
 output.srt
+
+# Whisper models
+whisper_live/models/*
