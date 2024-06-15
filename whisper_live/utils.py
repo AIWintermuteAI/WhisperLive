@@ -40,7 +40,6 @@ def create_srt_file(segments, output_file):
 
             segment_number += 1
 
-
 def resample(file: str, sr: int = 16000):
     """
     # https://github.com/openai/whisper/blob/7858aa9c08d98f75575035ecd6481f462d66ca27/whisper/audio.py#L22
