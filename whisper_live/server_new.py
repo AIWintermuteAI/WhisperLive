@@ -764,9 +764,6 @@ class ServeClientFasterWhisper(ServeClientBase):
         if self.model_size_or_path is None:
             return
 
-        if torch.cuda.is_available() and device == "cpu":
-            logging.warning("CUDA is available but using CPU for inference.")
-
         if single_model:
             if ServeClientFasterWhisper.SINGLE_MODEL is None:
                 self.create_model(device)
